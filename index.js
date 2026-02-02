@@ -43,6 +43,7 @@ async function run() {
     // Send a ping to confirm a successful connection
     const carccollection=client.db('courseDB').collection('coursecollection');
     const usercollection=client.db('courseDB').collection('usercollection');
+    const paymentcollection = client.db('courseDB').collection('paymentcollection');
     await client.db("admin").command({ ping: 1 });
      
 
@@ -83,6 +84,31 @@ app.post('/create-payment-intent',async(req,res)=>{
   }
 
 })
+
+app.post('/payment-success', async (req, res) => {
+  const { course_id, amount, paymentId } = req.body;
+
+  try {
+    // ✅ paymentdata object create
+    const paymentdata = {
+      course_id,
+      amount,
+      paymentId,
+      date: new Date(), // optional: কবে payment হলো track করার জন্য
+    };
+
+    // ✅ insert into collection
+    const result = await paymentcollection.insertOne(paymentdata);
+
+    console.log('Payment confirmed:', paymentdata);
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error saving payment:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 
 app.post('/gettoken',async(req,res)=>{
   const {email} = req.body;
@@ -129,7 +155,7 @@ app.post('/gettoken',async(req,res)=>{
      const result = await usercollection.insertOne({
   username,
   email,
-  role: "teacher"
+  role: "normal_user"
 });
      res.send(result);
       
