@@ -2,7 +2,7 @@ const { MongoClient, ServerApiVersion } = require('mongodb');
 const express = require('express');
 const cors = require('cors');
 const app = express();
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 5000;
 const crypto = require('crypto');
 
 require('dotenv').config();
@@ -86,13 +86,15 @@ app.post('/create-payment-intent',async(req,res)=>{
 })
 
 app.post('/payment-success', async (req, res) => {
-  const { course_id, amount, paymentId } = req.body;
+  const { course_id, amount, paymentId,useremail } = req.body;
 
   try {
     // ✅ paymentdata object create
     const paymentdata = {
       course_id,
       amount,
+      useremail,
+
       paymentId,
       date: new Date(), // optional: কবে payment হলো track করার জন্য
     };
