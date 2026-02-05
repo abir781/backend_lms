@@ -44,6 +44,7 @@ async function run() {
     const carccollection=client.db('courseDB').collection('coursecollection');
     const usercollection=client.db('courseDB').collection('usercollection');
     const paymentcollection = client.db('courseDB').collection('paymentcollection');
+    const teacherdatabase = client.db('courseDB').collection('teacherdatabase');
     await client.db("admin").command({ ping: 1 });
      
 
@@ -63,6 +64,16 @@ async function run() {
   const coursedata = req.body;
 
   const result = await carccollection.insertOne(coursedata);
+
+  res.send({
+    success: true,
+    insertedId: result.insertedId
+  });
+});
+
+app.post('/teachercreate', async(req,res)=>{
+  const teacherdata = req.body;
+  const result = await teacherdatabase.insertOne(teacherdata);
 
   res.send({
     success: true,
@@ -102,7 +113,14 @@ app.post('/payment-success', async (req, res) => {
     // ✅ insert into collection
     const result = await paymentcollection.insertOne(paymentdata);
 
+    const updateResult = await usercollection.updateOne(
+  { email: useremail },
+  { $set: { role: "student" } }
+);
+
     console.log('Payment confirmed:', paymentdata);
+
+
 
     res.json({ success: true });
   } catch (err) {
@@ -161,6 +179,13 @@ app.post('/gettoken',async(req,res)=>{
 });
      res.send(result);
       
+
+    })
+
+    app.get('/allusers',async(req,res)=>{
+
+       const alluser = await usercollection.find().toArray();
+       res.send(alluser);
 
     })
 
