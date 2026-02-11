@@ -5,6 +5,9 @@ const app = express();
 const port = process.env.PORT || 5000;
 const crypto = require('crypto');
 
+const axios = require('axios');
+const qs = require('querystring');
+
 require('dotenv').config();
 
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
@@ -47,6 +50,7 @@ async function run() {
     const paymentcollection = client.db('courseDB').collection('paymentcollection');
     const teacherdatabase = client.db('courseDB').collection('teacherdatabase');
     const announcementcollection = client.db('courseDB').collection('announcementcollection');
+    const virtualcollection = client.db('courseDB').collection('VirtualClasses');
     
     await client.db("admin").command({ ping: 1 });
      
@@ -163,89 +167,50 @@ app.post('/create-payment-intent', async (req, res) => {
 });
 
 
-// app.post('/payment-success', async (req, res) => {
-//   const { course_id, amount, paymentId,useremail,coursetitle } = req.body;
+app.get('/zoom/connect', (req, res) => {
+  const clientId = process.env.ZOOM_CLIENT_ID;
+  const redirectUri = encodeURIComponent(process.env.ZOOM_REDIRECT_URI);
 
-//   try {
-//     // ✅ paymentdata object create
-//     const paymentdata = {
-      
-//       amount,
-//       useremail,
+  const authUrl = `https://zoom.us/oauth/authorize?response_type=code&client_id=${clientId}&redirect_uri=${redirectUri}`;
+  res.redirect(authUrl); // Teacher will login & authorize
+});
 
-//       paymentId,
+
+app.get('/zoom/callback', async (req, res) => {
+  const code = req.query.code;
+  if (!code) return res.send("No authorization code received");
+
+  try {
+    // Step 2: Exchange code for access token
+    const tokenResponse = await axios.post('https://zoom.us/oauth/token', qs.stringify({
+      grant_type: 'authorization_code',
+      code: code,
+      redirect_uri: process.env.ZOOM_REDIRECT_URI
+    }), {
+      headers: {
+        'Authorization': 'Basic ' + Buffer.from(`${process.env.ZOOM_CLIENT_ID}:${process.env.ZOOM_CLIENT_SECRET}`).toString('base64'),
+        'Content-Type': 'application/x-www-form-urlencoded'
+      }
+    });
+
+    const accessToken = tokenResponse.data.access_token;
+    const refreshToken = tokenResponse.data.refresh_token;
+
+    // Store accessToken + refreshToken in DB linked to teacher account
+    // so you can use it later to create meetings
+    res.send({
+      message: "Zoom account connected successfully",
+      accessToken,
+      refreshToken
+    });
+  } catch (err) {
+    console.error("Zoom OAuth Error:", err.response?.data || err.message);
+    res.status(500).send({ error: "Failed to get access token" });
+  }
+});
 
    
-//       date: new Date(), // optional: কবে payment হলো track করার জন্য
-//     };
 
-//     // ✅ insert into collection
-//     const result = await paymentcollection.insertOne(paymentdata);
-
-//   const updateResult = await usercollection.updateOne(
-//   { email: useremail },
-//   {
-//     $set: { role: "student" },
-//     $push: {
-//       enrolled: {
-//         courseId: id,
-//         title: course.title,
-//         enrolledAt: new Date()
-//       }
-//     }
-//   }
-// );
-
-
-  
-
-//     console.log('Payment confirmed:', paymentdata);
-
-
-
-//     res.json({ success: true });
-//   } catch (err) {
-//     console.error('Error saving payment:', err);
-//     res.status(500).json({ success: false, error: err.message });
-//   }
-// });
-
-// app.post('/payment-success', async (req, res) => {
-//   const { course_id, amount, paymentId, useremail, coursetitle } = req.body;
-
-//   try {
-
-//     const paymentdata = {
-//       course_id,
-//       amount,
-//       useremail,
-//       paymentId,
-//       date: new Date(),
-//     };
-
-//     await paymentcollection.insertOne(paymentdata);
-
-//     await usercollection.updateOne(
-//       { email: useremail },
-//       {
-//         $set: { role: "student" },
-//         $push: {
-//           enrolled: {
-//             courseId: course_id,
-//             title: coursetitle,
-//             enrolledAt: new Date()
-//           }
-//         }
-//       }
-//     );
-
-//     res.json({ success: true });
-
-//   } catch (err) {
-//     console.error('Error saving payment:', err);
-//     res.status(500).json({ success: false, error: err.message });
-//   }
-// });
 
 
 app.post('/payment-success', async (req, res) => {
@@ -389,6 +354,67 @@ app.patch("/admin/teacher/:id/status", async(req,res)=>{
 
 
 })
+
+app.post("/api/liveclasses", async (req, res) => {
+  try {
+    const { courseId, title, startTime, duration, createdBy } = req.body;
+
+    if (!courseId || !title || !startTime || !duration || !createdBy) {
+      return res.status(400).json({ message: "All fields required" });
+    }
+
+    // Validate ObjectId
+    if (!ObjectId.isValid(courseId) || !ObjectId.isValid(createdBy)) {
+      return res.status(400).json({ message: "Invalid courseId or createdBy" });
+    }
+
+    // Validate date
+    const startDate = new Date(startTime);
+    if (isNaN(startDate.getTime())) {
+      return res.status(400).json({ message: "Invalid startTime" });
+    }
+
+    const liveClassDoc = {
+      courseId: new ObjectId(courseId),
+      title,
+      startTime: startDate,
+      duration: Number(duration),
+      status: "scheduled",
+      createdBy: new ObjectId(createdBy),
+      meetingProvider: "",
+      meetingId: "",
+      joinUrl: "",
+      recordingUrl: "",
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    const result = await virtualcollection.insertOne(liveClassDoc);
+    res.status(201).json({ message: "LiveClass created", id: result.insertedId });
+
+  } catch (err) {
+    console.error("LiveClass API Error:", err);
+    res.status(500).json({ message: "Server error", error: err.message });
+  }
+});
+
+
+app.get("/api/liveclasses", async (req, res) => {
+  try {
+    const liveClasses = await virtualcollection
+      .find({})
+      .sort({ startTime: -1 }) // latest first
+      .toArray();
+
+    res.status(200).json(liveClasses);
+  } catch (err) {
+    console.error("Get LiveClasses Error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
+
+
 
     app.post('/userrolewithdata',async(req,res)=>{
        const {username,email}= req.body;
